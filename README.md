@@ -15,9 +15,9 @@ Machine on macOS. **Not yet tested end-to-end with live Podman images.**
   |  - pass selected project bind mounts                  |
   |                                                       |
   |  project A ---- RW ----> /workspace                    |
-  |     .git/  ---- RO ----> /workspace/.git                |
+  |     .git/  -- RO/RW --> /workspace/.git                |
   |  project B ---- RW ----> /projects/2-project-b         |
-  |     .git/  ---- RO ----> /projects/2-project-b/.git    |
+  |     .git/  -- RO/RW --> /projects/2-project-b/.git    |
   |                                                       |
   |  Podman volume agent-home-claude ------------------+   |
   |  Podman volume agent-maven-cache ------------------+   |
@@ -66,6 +66,7 @@ From the root of a repository:
 agent claude
 agent codex
 agent gemini --image base
+agent claude --git rw      # permit staging, commits and branches
 agent bash --image backend
 ```
 
@@ -121,10 +122,15 @@ secret detection: arbitrary filenames, deeper directories and contents are not
 examined. The checks apply to **every** mounted project.
 
 For every project, the launcher checks whether a regular `.git/` directory is
-present at its root. If found, it is overmounted read-only. Otherwise the
+present at its root. By default (`--git ro`), it is overmounted read-only.
+Use `--git rw` to allow writes to Git metadata for all mounted projects; this
+skips the nested read-only mount. The flag does not change source-file access,
+which remains read/write in both modes. Git write access does not bypass
+secret-file warnings or confirmation. Otherwise the
 launcher warns and asks for confirmation before continuing; use `--yes` for
 noninteractive execution (including bypassing secret warnings). This includes Git worktrees (`.git` file), which
-are not supported for Git metadata protection yet. Passing a subdirectory
+are not supported for Git metadata protection yet. Their Git metadata may
+reside outside the mounted directory, even with `--git rw`. Passing a subdirectory
 rather than the repo root triggers the same warning.
 
 ## Lifetime, persistence and concurrent projects

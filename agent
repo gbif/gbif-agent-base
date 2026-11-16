@@ -8,6 +8,7 @@ Usage: agent {claude|codex|gemini|bash} [options] [-- agent-args...]
 Options:
   --image base|backend    Image flavor (default: backend)
   --project DIR           Mount a project (repeatable); first is /workspace
+  --git ro|rw             Git metadata access (default: ro)
   --yes                   Accept Git and security preflight warnings
   -h, --help              Show this help
 
@@ -29,6 +30,7 @@ case "$1" in
 esac
 
 flavor=backend
+git_access=ro
 assume_yes=false
 projects=()
 while (( $# > 0 )); do
@@ -36,6 +38,11 @@ while (( $# > 0 )); do
     --image)
       (( $# >= 2 )) || { echo 'Missing --image value' >&2; exit 2; }
       flavor=$2
+      shift 2
+      ;;
+    --git)
+      (( $# >= 2 )) || { echo 'Missing --git value' >&2; exit 2; }
+      git_access=$2
       shift 2
       ;;
     --project)
@@ -61,6 +68,11 @@ while (( $# > 0 )); do
       ;;
   esac
 done
+
+case "$git_access" in
+  ro|rw) ;;
+  *) echo "Unknown Git access mode: $git_access (expected ro or rw)" >&2; exit 2 ;;
+esac
 
 case "$flavor" in
   base|backend) ;;
@@ -192,14 +204,16 @@ for index in "${!projects[@]}"; do
   mounts+=(--mount "type=bind,source=${path},destination=${destination},rw")
 
   if [[ -d "$path/.git" && ! -L "$path/.git" ]]; then
-    mounts+=(--mount "type=bind,source=${path}/.git,destination=${destination}/.git,ro")
-    echo "Project: $path -> $destination (source RW; Git metadata RO)" >&2
+    if [[ "$git_access" == ro ]]; then
+      mounts+=(--mount "type=bind,source=${path}/.git,destination=${destination}/.git,ro")
+    fi
+    echo "Project: $path -> $destination (source RW; Git metadata ${git_access^^})" >&2
   elif [[ -e "$path/.git" || -L "$path/.git" ]]; then
-    warn "$destination: .git is not a regular directory (possibly a Git worktree); metadata unprotected"
-    echo "Project: $path -> $destination (RW; Git metadata NOT protected)" >&2
+    warn "$destination: .git is not a regular directory (possibly a Git worktree); Git metadata may be outside the mount"
+    echo "Project: $path -> $destination (source RW; Git metadata outside project mount may be inaccessible)" >&2
   else
-    warn "$destination: no .git directory at project root; metadata unprotected"
-    echo "Project: $path -> $destination (RW; no Git metadata protection)" >&2
+    warn "$destination: no .git directory at project root; cannot apply Git access policy"
+    echo "Project: $path -> $destination (RW; no Git metadata detected)" >&2
   fi
 
   scan_project "$path" "$destination"
