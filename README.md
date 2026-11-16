@@ -2,7 +2,7 @@
 
 Run Claude Code, OpenAI Codex, or Gemini CLI inside a disposable rootless Podman
 container, without mounting the host home directory. Targets Linux and Podman
-Machine on macOS. **Not yet tested end-to-end with live Podman images.**
+Machine on macOS.
 
 ## Overview
 
@@ -14,10 +14,10 @@ Machine on macOS. **Not yet tested end-to-end with live Podman images.**
   |  - validate Git roots + scan names for secret risks   |
   |  - pass selected project bind mounts                  |
   |                                                       |
-  |  project A ---- RW ----> /workspace                    |
-  |     .git/  -- RO/RW --> /workspace/.git                |
-  |  project B ---- RW ----> /projects/2-project-b         |
-  |     .git/  -- RO/RW --> /projects/2-project-b/.git    |
+  |  project A ---- RW ----> /workspace/project-a          |
+  |     .git/  -- RO/RW --> /workspace/project-a/.git      |
+  |  project B ---- RW ----> /workspace/project-b          |
+  |     .git/  -- RO/RW --> /workspace/project-b/.git      |
   |                                                       |
   |  Podman volume agent-home-claude ------------------+   |
   |  Podman volume agent-maven-cache ------------------+   |
@@ -30,7 +30,7 @@ Machine on macOS. **Not yet tested end-to-end with live Podman images.**
   |                                                   v   |
   |                 /home/agent (persistent per agent)     |
   |                 /home/agent/.m2/repository (shared)    |
-  |            /workspace + /projects (bind mounts)       |
+  |             /workspace/<project-name>/ (mounts)       |
   +-------------------------------------------------------+
 ```
 
@@ -70,20 +70,33 @@ agent claude --git rw      # permit staging, commits and branches
 agent bash --image backend
 ```
 
-Mount multiple projects (first = `/workspace`; subsequent mounts are named under
-`/projects/`):
+Every project is mounted at `/workspace/<project-directory-name>`; the first
+project is the container's working directory. With no `--project`, the launcher
+uses the current directory. This keeps repository directories together and leaves
+`/workspace` itself unmounted. For example, a project named `backend` starts at
+`/workspace/backend`.
+
+Mount multiple projects:
 
 ```sh
 agent claude --project "$HOME/code/backend" --project "$HOME/code/shared-library"
 agent codex --project . --project ../common -- --help
 ```
 
+Directory names must be distinct across projects. If two selected paths have
+identical final directory names, the launcher exits with an error rather than
+silently mounting one over the other. No project files are copied into the
+container; the bind mounts still write directly to their host directories.
+
 ## Maven cache and VPN connectivity
 
 When using `--image backend` (the default), the launcher mounts a named
 `agent-maven-cache` volume at `/home/agent/.m2/repository`. This is **shared
 between all agent CLIs and projects**, survives container removal, and is
-separate from the host's `~/.m2` directory. The `base` image does not mount it.
+separate from the host's `~/.m2` directory. It is **not** mounted under
+`/workspace`; the project folder should not gain a `.m2` cache from this mount.
+The `base` image does not mount it. If a project still produces a `.m2` folder,
+check project-specific Maven configuration or the invoked build command.
 
 The cache does **not** include Maven `settings.xml`. Private Maven repositories
 may still require separate mirror configuration and credentials; do not mount

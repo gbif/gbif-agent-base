@@ -7,13 +7,14 @@ Usage: agent {claude|codex|gemini|bash} [options] [-- agent-args...]
 
 Options:
   --image base|backend    Image flavor (default: backend)
-  --project DIR           Mount a project (repeatable); first is /workspace
+  --project DIR           Mount a project (repeatable); first is working directory
   --git ro|rw             Git metadata access (default: ro)
   --yes                   Accept Git and security preflight warnings
   -h, --help              Show this help
 
-Without --project, the current directory is used. Additional projects are
-mounted at /projects/2-NAME, /projects/3-NAME, etc.
+Without --project, the current directory is used. All projects are mounted
+under /workspace/NAME, using the project directory basename.
+The first project is the container working directory.
 The container is removed on exit; agent homes and Maven cache are retained.
 HELP
 }
@@ -177,6 +178,8 @@ confirm_warnings() {
 
 mounts=()
 resolved_projects=()
+resolved_destinations=()
+primary_destination=
 for index in "${!projects[@]}"; do
   original=${projects[$index]}
   if [[ ! -d "$original" ]]; then
@@ -193,12 +196,17 @@ for index in "${!projects[@]}"; do
   done
   resolved_projects+=("$path")
 
+  name=$(basename "$path")
+  destination="/workspace/${name}"
+  for prior in "${resolved_destinations[@]}"; do
+    if [[ "$destination" == "$prior" ]]; then
+      echo "Project names collide at $destination; select distinct directory names." >&2
+      exit 1
+    fi
+  done
+  resolved_destinations+=("$destination")
   if (( index == 0 )); then
-    destination=/workspace
-  else
-    name=$(basename "$path")
-    name=$(printf '%s' "$name" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')
-    destination="/projects/$((index + 1))-${name}"
+    primary_destination=$destination
   fi
 
   mounts+=(--mount "type=bind,source=${path},destination=${destination},rw")
@@ -253,5 +261,5 @@ exec podman run --rm -it \
   "${mounts[@]}" \
   --mount "type=volume,source=${volume},destination=/home/agent,volume-opt=U" \
   "${maven_mount[@]}" \
-  --workdir /workspace \
+  --workdir "$primary_destination" \
   "$image" "$agent_name" "$@"
