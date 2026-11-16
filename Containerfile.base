@@ -1,0 +1,18 @@
+FROM docker.io/library/node:22-bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      bash ca-certificates curl git jq ripgrep fd-find \
+      findutils coreutils tar unzip procps less openssh-client \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build-time updates are intentional. Pin package versions for reproducible releases.
+RUN npm install --global --no-audit --no-fund \
+      @anthropic-ai/claude-code \
+      @openai/codex \
+      @google/gemini-cli
+
+ENV HOME=/home/agent
+WORKDIR /workspace
+CMD ["bash"]

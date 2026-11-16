@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'HELP'
+Usage: agent {claude|codex|gemini|bash} [options] [-- agent-args...]
+
+Options:
+  --image base|backend    Image flavor (default: backend)
+  --project DIR           Mount a project (repeatable); first is /workspace
+  --yes                   Accept Git and security preflight warnings
+  -h, --help              Show this help
+
+Without --project, the current directory is used. Additional projects are
+mounted at /projects/2-NAME, /projects/3-NAME, etc.
+The container is removed on exit; agent-specific home volumes are retained.
+HELP
+}
+
+if (( $# == 0 )); then
+  usage >&2
+  exit 2
+fi
+
+case "$1" in
+  -h|--help) usage; exit 0 ;;
+  claude|codex|gemini|bash) agent_name=$1; shift ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+flavor=backend
+assume_yes=false
+projects=()
+while (( $# > 0 )); do
+  case "$1" in
+    --image)
+      (( $# >= 2 )) || { echo 'Missing --image value' >&2; exit 2; }
+      flavor=$2
+      shift 2
+      ;;
+    --project)
+      (( $# >= 2 )) || { echo 'Missing --project directory' >&2; exit 2; }
+      projects+=("$2")
+      shift 2
+      ;;
+    --yes)
+      assume_yes=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      # Remaining parameters belong to the selected agent.
+      break
+      ;;
+  esac
+done
+
+case "$flavor" in
+  base|backend) ;;
+  *) echo "Unknown image flavor: $flavor" >&2; exit 2 ;;
+esac
+
+if (( ${#projects[@]} == 0 )); then
+  projects+=("$PWD")
+fi
+
+command -v podman >/dev/null || { echo 'Podman not found' >&2; exit 1; }
+
+warnings=()
+warn() {
+  warnings+=("$1")
+}
+
+# Check names and mount boundaries only; never open or print credential contents.
+# Ignore common test fixtures, samples, generated dependencies and Git internals.
+scan_project() {
+  local path=$1 destination=$2 entry rel base lower
+  local found=0
+  local home_real
+  home_real=$(cd "$HOME" && pwd -P)
+
+  if [[ "$path" == "$home_real" || "$home_real" == "$path"/* ]]; then
+    warn "$destination: mount exposes the host home directory ($home_real)"
+  fi
+
+  case "$path" in
+    */.ssh|*/.aws|*/.config|*/.kube|*/.gnupg|*/.docker)
+      warn "$destination: directly mounting a credential/configuration directory ($path)"
+      ;;
+  esac
+
+  while IFS= read -r -d '' entry; do
+    rel=${entry#"$path"/}
+    lower=$(printf '%s' "$rel" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    base=${lower##*/}
+
+    case "/$lower/" in
+      */test/*|*/tests/*|*/testdata/*|*/fixtures/*|*/__tests__/*|*/examples/*|*/samples/*)
+        continue
+        ;;
+    esac
+    case "$base" in
+      *test*|*mock*|*fixture*|*sample*|*example*|*template*|*.dist|*.example)
+        continue
+        ;;
+    esac
+
+    case "$base" in
+      .env|.env.*|.npmrc|.pypirc|.netrc|credentials|credentials.json|service-account.json|id_rsa|id_ed25519|*.pem|*.key|*.p12|*.pfx|terraform.tfstate|terraform.tfstate.*)
+        warn "$destination: possible credential file: $rel"
+        found=$((found + 1))
+        ;;
+    esac
+    if (( found >= 8 )); then
+      warn "$destination: additional matching files may exist (showing first 8)"
+      break
+    fi
+  done < <(
+    find "$path" -maxdepth 5 \
+      \( -type d \( -name .git -o -name node_modules -o -name target -o -name .venv -o -name vendor -o -name dist -o -name build \) -prune \) -o \
+      \( -type f -print0 \) 2>/dev/null
+  )
+
+  for entry in .ssh .aws .kube .gnupg .docker; do
+    if [[ -e "$path/$entry" || -L "$path/$entry" ]]; then
+      warn "$destination: sensitive directory or link at project root: $entry"
+    fi
+  done
+}
+
+confirm_warnings() {
+  local item answer
+  if (( ${#warnings[@]} == 0 )); then
+    echo 'Preflight: no common credential-file or mount warnings detected (not a security guarantee).' >&2
+    return
+  fi
+
+  echo 'Preflight warnings:' >&2
+  for item in "${warnings[@]}"; do
+    printf '  - %s\n' "$item" >&2
+  done
+  echo 'These are heuristic checks; unrecognized secrets can still be exposed.' >&2
+
+  if [[ "$assume_yes" == true ]]; then
+    echo 'Continuing because --yes was provided.' >&2
+    return
+  fi
+  if [[ ! -r /dev/tty ]]; then
+    echo 'No interactive terminal for confirmation. Pass --yes to continue.' >&2
+    exit 1
+  fi
+  read -r -p 'Continue with these mounts? [y/N] ' answer </dev/tty || exit 1
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) echo 'Cancelled.' >&2; exit 1 ;;
+  esac
+}
+
+mounts=()
+resolved_projects=()
+for index in "${!projects[@]}"; do
+  original=${projects[$index]}
+  if [[ ! -d "$original" ]]; then
+    echo "Not a directory: $original" >&2
+    exit 1
+  fi
+
+  path=$(cd "$original" && pwd -P)
+  for prior in "${resolved_projects[@]}"; do
+    if [[ "$path" == "$prior" ]]; then
+      echo "Duplicate project directory: $path" >&2
+      exit 1
+    fi
+  done
+  resolved_projects+=("$path")
+
+  if (( index == 0 )); then
+    destination=/workspace
+  else
+    name=$(basename "$path")
+    name=$(printf '%s' "$name" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')
+    destination="/projects/$((index + 1))-${name}"
+  fi
+
+  mounts+=(--mount "type=bind,source=${path},destination=${destination},rw")
+
+  if [[ -d "$path/.git" && ! -L "$path/.git" ]]; then
+    mounts+=(--mount "type=bind,source=${path}/.git,destination=${destination}/.git,ro")
+    echo "Project: $path -> $destination (source RW; Git metadata RO)" >&2
+  elif [[ -e "$path/.git" || -L "$path/.git" ]]; then
+    warn "$destination: .git is not a regular directory (possibly a Git worktree); metadata unprotected"
+    echo "Project: $path -> $destination (RW; Git metadata NOT protected)" >&2
+  else
+    warn "$destination: no .git directory at project root; metadata unprotected"
+    echo "Project: $path -> $destination (RW; no Git metadata protection)" >&2
+  fi
+
+  scan_project "$path" "$destination"
+done
+
+confirm_warnings
+
+image="localhost/agent-${flavor}:latest"
+volume="agent-home-${agent_name}"
+
+if ! podman volume exists "$volume"; then
+  podman volume create "$volume" >/dev/null
+fi
+
+exec podman run --rm -it \
+  --name "agent-${agent_name}-$$" \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  --security-opt=no-new-privileges \
+  --cap-drop=ALL \
+  --pids-limit=512 \
+  --memory=6g \
+  --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+  --env HOME=/home/agent \
+  --env GIT_OPTIONAL_LOCKS=0 \
+  "${mounts[@]}" \
+  --mount "type=volume,source=${volume},destination=/home/agent,volume-opt=U" \
+  --workdir /workspace \
+  "$image" "$agent_name" "$@"

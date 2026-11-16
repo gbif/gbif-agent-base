@@ -1,0 +1,138 @@
+# Local agent sandbox (prototype)
+
+Run Claude Code, OpenAI Codex, or Gemini CLI inside a disposable rootless Podman
+container, without mounting the host home directory. Targets Linux and Podman
+Machine on macOS. **Not yet tested end-to-end with live Podman images.**
+
+## Overview
+
+```text
+                     host (Linux / macOS)
+  +-------------------------------------------------------+
+  | agent launcher                                        |
+  |  - choose agent + image                               |
+  |  - validate Git roots + scan names for secret risks   |
+  |  - pass selected project bind mounts                  |
+  |                                                       |
+  |  project A ---- RW ----> /workspace                    |
+  |     .git/  ---- RO ----> /workspace/.git                |
+  |  project B ---- RW ----> /projects/2-project-b         |
+  |     .git/  ---- RO ----> /projects/2-project-b/.git    |
+  |                                                       |
+  |  Podman volume agent-home-claude ------------------+   |
+  +---------------------------------------------------|---+
+                                                      |
+                     disposable container            |
+  +---------------------------------------------------|---+
+  | agent-base (Claude / Codex / Gemini, Git, rg, jq)  |   |
+  |       + agent-backend (Java 17, Maven)             |   |
+  |                                                   v   |
+  |                 /home/agent (persistent per agent)     |
+  |            /workspace + /projects (bind mounts)       |
+  +-------------------------------------------------------+
+```
+
+## Build and install
+
+Prerequisites: Podman (with an initialized and running Podman machine on macOS),
+[Bash](https://www.gnu.org/software/bash/), and optionally
+[Task](https://taskfile.dev/) for convenient image builds.
+
+```sh
+task build                # builds base, then backend
+task install              # installs launcher at ~/.local/bin/agent
+```
+
+Without Task:
+
+```sh
+podman build -f Containerfile.base -t localhost/agent-base:latest .
+podman build -f Containerfile.backend -t localhost/agent-backend:latest .
+bash ./install.sh
+```
+
+The installer only copies the `agent` launcher. Override its destination with
+`INSTALL_DIR="$HOME/bin" bash ./install.sh`. Make sure it is on `PATH`.
+Images are updated explicitly by rebuilding; neither the launcher nor the
+container automatically updates agent versions.
+
+## Usage
+
+From the root of a repository:
+
+```sh
+agent claude
+agent codex
+agent gemini --image base
+agent bash --image backend
+```
+
+Mount multiple projects (first = `/workspace`; subsequent mounts are named under
+`/projects/`):
+
+```sh
+agent claude --project "$HOME/code/backend" --project "$HOME/code/shared-library"
+agent codex --project . --project ../common -- --help
+```
+
+With no `--project` flags, the current directory is the primary project.
+`--` separates launcher flags from the agent's own flags.
+
+Before starting Podman, the launcher checks each selected project for likely
+credential filenames (`.env`, `.env.local`, `.npmrc`, `.netrc`, private keys,
+service account JSON, etc.), common hidden credential directories, and mounts
+that encompass the host home directory. It scans filenames only, at most five
+directory levels deep, and skips common test/fixture/example directories and
+generated dependencies. Up to eight matching files per project are reported.
+The warnings are consolidated into **one confirmation** (or accepted by
+`--yes`); nothing is blocked permanently. Treat this as a sanity check, not
+secret detection: arbitrary filenames, deeper directories and contents are not
+examined. The checks apply to **every** mounted project.
+
+For every project, the launcher checks whether a regular `.git/` directory is
+present at its root. If found, it is overmounted read-only. Otherwise the
+launcher warns and asks for confirmation before continuing; use `--yes` for
+noninteractive execution (including bypassing secret warnings). This includes Git worktrees (`.git` file), which
+are not supported for Git metadata protection yet. Passing a subdirectory
+rather than the repo root triggers the same warning.
+
+## Lifetime, persistence and concurrent projects
+
+- `podman run --rm -it`: a fresh container is created for each invocation and
+  deleted on exit. There is no automatic restart or resumption of the process.
+- Home/config volumes are **persistent per agent CLI**, named `agent-home-claude`,
+  `agent-home-codex`, `agent-home-gemini` (and `agent-home-bash` for shells).
+  Credentials, settings and session files stored under `/home/agent` survive.
+- Volumes are **shared across all projects for that agent**, not per project.
+  This is intentional for convenient sign-in, but means agent-side history and
+  config can be accessed by subsequent sessions using the same agent.
+- Concurrent agent sessions may share the same home volume and project files.
+  Do not run simultaneous writers on the same worktree without coordination.
+- All source edits are immediately reflected on the host via bind mounts.
+  Removing a container does **not** undo source modifications.
+- See persisted volumes with `podman volume ls`. Removing a home volume loses
+  the agent's stored authentication and settings.
+
+## Security model and limitations
+
+- Project directories are writable; nested ordinary `.git/` directories are
+  read-only, as confirmed in a simple bind-mount test on macOS Podman.
+- No host `$HOME`, host SSH agent, browser profile or Podman/Docker socket is
+  deliberately exposed; the agent has its own persistent configuration volume.
+- Rootless Podman is the intended setup; dropped Linux capabilities, no-new-privileges,
+  and resource limits are enabled. On macOS Podman operates inside a Linux VM.
+- **Network access is unrestricted**; agents can transmit any files visible
+  through mounts, including `.env` files and secrets inside repositories.
+- Read-only `.git` mounts are a practical guard against ordinary Git metadata
+  writes, **not** a verified protection against all hostile filesystem tricks.
+- Mounted project paths can contain credentials, symlinks or nested repositories.
+  Inspect them before granting access. Mounting multiple repositories increases
+  how much data the agent can read or alter.
+- `HOME` is persistent, and each agent can inspect its own credentials and
+  history. Do not share these volumes with untrusted containers.
+- Login flows may require copying a browser URL or device code from the CLI.
+- The Node.js base and npm-installed agent CLIs use floating versions. Pin
+  versions and establish a patch/update policy before team rollout.
+- Not yet covered: Git worktree metadata, automated network allowlists,
+  project-secret exclusion, read-only container rootfs, SELinux labeling,
+  Maven cache tuning and automated Podman integration tests.
