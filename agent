@@ -13,7 +13,7 @@ Options:
 
 Without --project, the current directory is used. Additional projects are
 mounted at /projects/2-NAME, /projects/3-NAME, etc.
-The container is removed on exit; agent-specific home volumes are retained.
+The container is removed on exit; agent homes and Maven cache are retained.
 HELP
 }
 
@@ -209,9 +209,20 @@ confirm_warnings
 
 image="localhost/agent-${flavor}:latest"
 volume="agent-home-${agent_name}"
+maven_volume=agent-maven-cache
 
 if ! podman volume exists "$volume"; then
   podman volume create "$volume" >/dev/null
+fi
+
+if [[ "$flavor" == backend ]] && ! podman volume exists "$maven_volume"; then
+  podman volume create "$maven_volume" >/dev/null
+fi
+
+# Mount after the home volume so the shared repository overlays ~/.m2/repository.
+maven_mount=()
+if [[ "$flavor" == backend ]]; then
+  maven_mount=(--mount "type=volume,source=${maven_volume},destination=/home/agent/.m2/repository,volume-opt=U")
 fi
 
 exec podman run --rm -it \
@@ -227,5 +238,6 @@ exec podman run --rm -it \
   --env GIT_OPTIONAL_LOCKS=0 \
   "${mounts[@]}" \
   --mount "type=volume,source=${volume},destination=/home/agent,volume-opt=U" \
+  "${maven_mount[@]}" \
   --workdir /workspace \
   "$image" "$agent_name" "$@"

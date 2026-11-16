@@ -20,6 +20,7 @@ Machine on macOS. **Not yet tested end-to-end with live Podman images.**
   |     .git/  ---- RO ----> /projects/2-project-b/.git    |
   |                                                       |
   |  Podman volume agent-home-claude ------------------+   |
+  |  Podman volume agent-maven-cache ------------------+   |
   +---------------------------------------------------|---+
                                                       |
                      disposable container            |
@@ -28,6 +29,7 @@ Machine on macOS. **Not yet tested end-to-end with live Podman images.**
   |       + agent-backend (Java 17, Maven)             |   |
   |                                                   v   |
   |                 /home/agent (persistent per agent)     |
+  |                 /home/agent/.m2/repository (shared)    |
   |            /workspace + /projects (bind mounts)       |
   +-------------------------------------------------------+
 ```
@@ -75,6 +77,35 @@ agent claude --project "$HOME/code/backend" --project "$HOME/code/shared-library
 agent codex --project . --project ../common -- --help
 ```
 
+## Maven cache and VPN connectivity
+
+When using `--image backend` (the default), the launcher mounts a named
+`agent-maven-cache` volume at `/home/agent/.m2/repository`. This is **shared
+between all agent CLIs and projects**, survives container removal, and is
+separate from the host's `~/.m2` directory. The `base` image does not mount it.
+
+The cache does **not** include Maven `settings.xml`. Private Maven repositories
+may still require separate mirror configuration and credentials; do not mount
+your host settings file without reviewing it. A shared writable dependency
+cache is not a trust boundary: any agent can modify cached artifacts.
+
+Test whether the default network path reaches a service available on the VPN:
+
+```sh
+bash ./vpn-test.sh
+# or
+ task vpn-test
+# optional alternative endpoint
+bash ./vpn-test.sh 'http://mq.gbif.org:15672/'
+```
+
+The diagnostic compares host and container HTTP connectivity (including DNS)
+using `curl`. Any HTTP status, including 401 or 403, confirms that a server
+responded; the script does not send credentials. It needs the base image built
+first (`task base`). On macOS, Podman networking passes through its Linux VM;
+some university VPNs may prevent private DNS or routes from working there.
+
+
 With no `--project` flags, the current directory is the primary project.
 `--` separates launcher flags from the agent's own flags.
 
@@ -106,6 +137,9 @@ rather than the repo root triggers the same warning.
 - Volumes are **shared across all projects for that agent**, not per project.
   This is intentional for convenient sign-in, but means agent-side history and
   config can be accessed by subsequent sessions using the same agent.
+- The Maven repository volume is shared among backend agent sessions, including
+  concurrent sessions; cache writes can conflict and downloaded artifacts should
+  not be treated as trusted merely because they are cached.
 - Concurrent agent sessions may share the same home volume and project files.
   Do not run simultaneous writers on the same worktree without coordination.
 - All source edits are immediately reflected on the host via bind mounts.
@@ -135,4 +169,4 @@ rather than the repo root triggers the same warning.
   versions and establish a patch/update policy before team rollout.
 - Not yet covered: Git worktree metadata, automated network allowlists,
   project-secret exclusion, read-only container rootfs, SELinux labeling,
-  Maven cache tuning and automated Podman integration tests.
+  Maven settings/credentials and automated Podman integration tests.

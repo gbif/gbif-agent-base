@@ -33,3 +33,8 @@ tasks:
     desc: Show locally built agent images
     cmds:
       - podman images --filter reference=localhost/agent-*
+
+  vpn-test:
+    desc: Compare host and container HTTP access to a VPN-only endpoint
+    cmds:
+      - bash ./vpn-test.sh
