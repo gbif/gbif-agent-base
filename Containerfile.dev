@@ -11,6 +11,8 @@ RUN rustup component add rustfmt clippy && cargo install --locked eza
 
 FROM ghcr.io/astral-sh/uv:latest AS uv
 
+FROM docker.io/library/eclipse-temurin:25-jdk-jammy AS java25
+
 FROM localhost/agent-base:latest
 USER root
 RUN apt-get update \
@@ -31,8 +33,14 @@ COPY --from=rust-tools /usr/local/cargo/bin/ /opt/cargo/bin/
 COPY --from=rust-tools /usr/local/rustup/ /opt/rustup/
 COPY --from=rust-tools /usr/local/cargo/bin/eza /usr/local/bin/eza
 COPY --from=uv /uv /uvx /usr/local/bin/
+COPY --from=java25 /opt/java/openjdk/ /opt/java25/
+# Keep Debian's Java 17 alternatives as the default; expose 25 explicitly.
+RUN ln -s /opt/java25/bin/java /usr/local/bin/java25 \
+    && ln -s /opt/java25/bin/javac /usr/local/bin/javac25 \
+    && java -version && java25 -version
 
 ENV LANG=en_US.UTF-8 \
+    JAVA25_HOME=/opt/java25 \
     UV_PYTHON_INSTALL_DIR=/opt/python \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
     PATH=/home/agent/.local/bin:/home/agent/.cargo/bin:/home/agent/go/bin:/usr/local/go/bin:/opt/python-bin:/opt/cargo/bin:$PATH

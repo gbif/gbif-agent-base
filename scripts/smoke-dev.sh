@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run inside agent-dev through its entrypoint, including as a non-root user.
-for tool in ruby bundle node npm npx pnpm yarn python python3 uv uvx java javac mvn \
+for tool in ruby bundle node npm npx pnpm yarn python python3 uv uvx java javac java25 javac25 mvn \
   go rustup rustc cargo rustfmt cargo-clippy cc c++ make cmake pkg-config \
   git git-lfs rg fd jq eza yq task helm kubeconform yamllint shellcheck shfmt \
   sqlite3 psql pg_dump pg_restore tar gzip xz bzip2 zstd zip unzip diff patch \
@@ -13,6 +13,11 @@ node --version
 python --version
 ruby --version
 java -version
+java -version 2>&1 | rg 'version "17\.'
+javac -version 2>&1 | rg '^javac 17\.'
+java25 -version 2>&1 | rg 'version "25[."]'
+javac25 -version 2>&1 | rg '^javac 25([.]|$)'
+env JAVA_HOME="$JAVA25_HOME" PATH="$JAVA25_HOME/bin:$PATH" mvn -version | rg 'Java version: 25([,.]|$)'
 go version
 rustc --version
 cargo fmt --version

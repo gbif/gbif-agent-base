@@ -248,6 +248,13 @@ if [[ "$flavor" == dev ]]; then
   maven_mount=(--mount "type=volume,source=${maven_volume},destination=/home/agent/.m2/repository,volume-opt=U")
 fi
 
+# Podman provides isolation. Avoid nesting Codex's command sandbox inside it;
+# restricted containers may not support the mounts that sandbox requires.
+agent_args=()
+if [[ "$agent_name" == codex ]]; then
+  agent_args+=(--dangerously-bypass-approvals-and-sandbox)
+fi
+
 exec podman run --rm -it \
   --name "agent-${agent_name}-$$" \
   --userns=keep-id \
@@ -263,4 +270,4 @@ exec podman run --rm -it \
   --mount "type=volume,source=${volume},destination=/home/agent,volume-opt=U" \
   "${maven_mount[@]}" \
   --workdir "$primary_destination" \
-  "$image" "$agent_name" "$@"
+  "$image" "$agent_name" "${agent_args[@]}" "$@"

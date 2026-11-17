@@ -64,7 +64,7 @@ container automatically updates agent versions.
 
 - Ruby and Bundler; Node/npm with nvm, pnpm and Yarn.
 - Python 3.13 with uv for additional Python versions and environments, plus system Python.
-- Java 17 JDK and Maven, Go, and Rust through rustup with Cargo, rustfmt and Clippy.
+- Java 17 (default) and Java 25 JDKs with Maven, Go, and Rust through rustup with Cargo, rustfmt and Clippy.
 - GCC/G++, make, CMake, pkg-config and common native extension headers.
 - SQLite and PostgreSQL clients, without database servers.
 - eza, yq, go-task (`task`), ShellCheck, shfmt, yamllint and Git LFS.
@@ -96,6 +96,27 @@ toolchain; install a named version with rustup when a project needs one.
 Ruby uses Debian's version; multiple Ruby versions need a separate version manager.
 Use project Maven/Gradle wrappers and project-pinned dependencies where available.
 
+Plain `java` and `javac` use Java 17. `java25` and `javac25` run the bundled
+Eclipse Temurin 25 JDK directly. Agents can select Java 25 for a single build:
+
+```sh
+JAVA_HOME="$JAVA25_HOME" PATH="$JAVA25_HOME/bin:$PATH" mvn verify
+# Or use the same environment with ./mvnw or ./gradlew.
+```
+
+To select it for the rest of a shell session:
+
+```sh
+export JAVA_HOME="$JAVA25_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
+java -version
+```
+
+`JAVA25_HOME` points to `/opt/java25`, outside the persistent home volume.
+Runtime selection applies to that process and its children; new containers
+start with Java 17 again. Rebuild `agent-dev` and start a new session to get
+the additional JDK.
+
 Builds intentionally follow upstream versions for Go, Rust, uv, helper binaries,
 Node package managers and browser tooling. Python, nvm and Helm defaults can be
 overridden with `--build-arg PYTHON_VERSION=...`, `NVM_VERSION=...`, and
@@ -115,6 +136,18 @@ agent gemini --image base
 agent claude --git rw      # permit staging, commits and branches
 agent bash --image dev
 ```
+
+`agent codex` automatically passes
+`--dangerously-bypass-approvals-and-sandbox`. Podman provides the isolation;
+Codex can run commands, including Maven builds, without individual approvals or
+an additional command sandbox. This also applies to `agent codex -- resume --last`.
+Reinstall the launcher with `bash ./install.sh` after updating it, then start a
+new container session; no image rebuild is needed for this change. Existing
+sessions keep their original permission settings.
+
+Read-only mounts still apply: use `agent codex --git rw` when you want staging,
+commits, and other Git metadata writes. `cat`, `ls`, and `git diff` work with
+the default read-only Git metadata mount.
 
 Every project is mounted at `/workspace/<project-directory-name>`; the first
 project is the container's working directory. With no `--project`, the launcher
