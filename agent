@@ -6,7 +6,7 @@ usage() {
 Usage: agent {claude|codex|gemini|bash} [options] [-- agent-args...]
 
 Options:
-  --image base|backend    Image flavor (default: backend)
+  --image base|dev        Image flavor (default: dev; backend aliases dev)
   --project DIR           Mount a project (repeatable); first is working directory
   --git ro|rw             Git metadata access (default: ro)
   --yes                   Accept Git and security preflight warnings
@@ -30,7 +30,7 @@ case "$1" in
   *) usage >&2; exit 2 ;;
 esac
 
-flavor=backend
+flavor=dev
 git_access=ro
 assume_yes=false
 projects=()
@@ -76,7 +76,8 @@ case "$git_access" in
 esac
 
 case "$flavor" in
-  base|backend) ;;
+  base|dev) ;;
+  backend) flavor=dev ;;
   *) echo "Unknown image flavor: $flavor" >&2; exit 2 ;;
 esac
 
@@ -237,13 +238,13 @@ if ! podman volume exists "$volume"; then
   podman volume create "$volume" >/dev/null
 fi
 
-if [[ "$flavor" == backend ]] && ! podman volume exists "$maven_volume"; then
+if [[ "$flavor" == dev ]] && ! podman volume exists "$maven_volume"; then
   podman volume create "$maven_volume" >/dev/null
 fi
 
 # Mount after the home volume so the shared repository overlays ~/.m2/repository.
 maven_mount=()
-if [[ "$flavor" == backend ]]; then
+if [[ "$flavor" == dev ]]; then
   maven_mount=(--mount "type=volume,source=${maven_volume},destination=/home/agent/.m2/repository,volume-opt=U")
 fi
 

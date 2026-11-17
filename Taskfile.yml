@@ -8,19 +8,26 @@ tasks:
       - task --list
 
   build:
-    desc: Build base and backend images
+    desc: Build base and shared development images
     deps:
-      - backend
+      - dev
 
   base:
     desc: Build CLI and shared tooling image
     cmds:
       - podman build -f Containerfile.base -t localhost/agent-base:latest .
 
-  backend:
-    desc: Build backend image (depends on base)
+  dev:
+    desc: Build shared development image (depends on base)
     deps:
       - base
+    cmds:
+      - podman build -f Containerfile.dev -t localhost/agent-dev:latest .
+
+  backend:
+    desc: Build compatibility backend tag (depends on dev)
+    deps:
+      - dev
     cmds:
       - podman build -f Containerfile.backend -t localhost/agent-backend:latest .
 
@@ -28,6 +35,11 @@ tasks:
     desc: Install launcher into ~/.local/bin (or INSTALL_DIR)
     cmds:
       - bash ./install.sh
+
+  smoke:
+    desc: Check development tools as an unprivileged user with a fresh home
+    cmds:
+      - podman run --rm --user 1000:1000 --env HOME=/tmp/agent-smoke --cap-drop=ALL --security-opt=no-new-privileges --mount type=bind,source={{.TASKFILE_DIR}}/scripts/smoke-dev.sh,destination=/tmp/smoke-dev.sh,ro localhost/agent-dev:latest bash /tmp/smoke-dev.sh
 
   images:
     desc: Show locally built agent images

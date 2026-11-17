@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The home volume may predate this image. Seed links without replacing user state.
+mkdir -p "$HOME/.nvm/versions/node" "$HOME/.nvm/alias" "$HOME/.local/bin"
+for helper in nvm.sh nvm-exec bash_completion; do
+  if [[ ! -e "$HOME/.nvm/$helper" && ! -L "$HOME/.nvm/$helper" ]]; then
+    ln -s "/opt/nvm/$helper" "$HOME/.nvm/$helper"
+  fi
+done
+for version in /opt/nvm/versions/node/*; do
+  destination="$HOME/.nvm/versions/node/${version##*/}"
+  if [[ ! -e "$destination" && ! -L "$destination" ]]; then
+    ln -s "$version" "$destination"
+  fi
+done
+if [[ ! -e "$HOME/.nvm/alias/default" ]]; then
+  node --version > "$HOME/.nvm/alias/default"
+fi
+export NVM_DIR="$HOME/.nvm"
+export BASH_ENV=/etc/profile.d/agent-dev.sh
+source /etc/profile.d/agent-dev.sh
+
+# Keep the toolchain in the image, and rustup configuration/user additions in HOME.
+if [[ ! -f "$HOME/.rustup/settings.toml" ]]; then
+  for toolchain in /opt/rustup/toolchains/*; do
+    rustup toolchain link image "$toolchain"
+    break
+  done
+  rustup default image
+fi
+export GEM_HOME="$HOME/.local/share/gem"
+export UV_PYTHON_INSTALL_DIR="$HOME/.local/share/uv/python"
+export PATH="$GEM_HOME/bin:$PATH"
+mkdir -p "$GEM_HOME"
+exec "$@"

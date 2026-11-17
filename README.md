@@ -26,7 +26,7 @@ Machine on macOS.
                      disposable container            |
   +---------------------------------------------------|---+
   | agent-base (Claude / Codex / Gemini, Git, rg, jq)  |   |
-  |       + agent-backend (Java 17, Maven)             |   |
+  |       + agent-dev (shared development tools)      |   |
   |                                                   v   |
   |                 /home/agent (persistent per agent)     |
   |                 /home/agent/.m2/repository (shared)    |
@@ -41,7 +41,7 @@ Prerequisites: Podman (with an initialized and running Podman machine on macOS),
 [Task](https://taskfile.dev/) for convenient image builds.
 
 ```sh
-task build                # builds base, then backend
+task build                # builds base, then dev
 task install              # installs launcher at ~/.local/bin/agent
 ```
 
@@ -49,7 +49,7 @@ Without Task:
 
 ```sh
 podman build -f Containerfile.base -t localhost/agent-base:latest .
-podman build -f Containerfile.backend -t localhost/agent-backend:latest .
+podman build -f Containerfile.dev -t localhost/agent-dev:latest .
 bash ./install.sh
 ```
 
@@ -57,6 +57,52 @@ The installer only copies the `agent` launcher. Override its destination with
 `INSTALL_DIR="$HOME/bin" bash ./install.sh`. Make sure it is on `PATH`.
 Images are updated explicitly by rebuilding; neither the launcher nor the
 container automatically updates agent versions.
+
+## Shared development image
+
+`agent-base` contains the agent CLIs and common shell tools. `agent-dev` adds:
+
+- Ruby and Bundler; Node/npm with nvm, pnpm and Yarn.
+- Python 3.13 with uv for additional Python versions and environments, plus system Python.
+- Java 17 JDK and Maven, Go, and Rust through rustup with Cargo, rustfmt and Clippy.
+- GCC/G++, make, CMake, pkg-config and common native extension headers.
+- SQLite and PostgreSQL clients, without database servers.
+- eza, yq, go-task (`task`), ShellCheck, shfmt, yamllint and Git LFS.
+- Archive, file inspection, process and network diagnostic utilities, UTF-8 locales and timezone data.
+- Playwright with Chromium and its system dependencies for browser checks.
+- Helm and kubeconform for local chart rendering and manifest validation.
+
+GitHub CLI (`gh`) and kubectl are intentionally excluded. No cluster credentials,
+container socket or host kubeconfig are mounted automatically. Kubernetes schemas
+are not bundled: kubeconform downloads schemas when validating, and custom resource
+schemas must be supplied separately. For example:
+
+```sh
+helm lint ./chart
+helm template example ./chart | kubeconform -strict -summary
+```
+
+The launcher defaults to `dev`; `--image backend` remains an alias for `dev`.
+`task backend` also builds the legacy image tag for direct Podman callers.
+Run `task smoke` after building to check tools and a headless browser as an
+unprivileged user with a fresh temporary home.
+
+Baked toolchains live outside `/home/agent`, so existing home volumes do not hide
+new image installations. nvm is loaded for interactive and noninteractive Bash;
+other compatible shells can source `/opt/nvm/nvm.sh` after setting
+`NVM_DIR=$HOME/.nvm`. User-installed Node/Python/Rust versions and Ruby gems
+persist in the home volume. Rust's initial `image` toolchain links to the bundled
+toolchain; install a named version with rustup when a project needs one.
+Ruby uses Debian's version; multiple Ruby versions need a separate version manager.
+Use project Maven/Gradle wrappers and project-pinned dependencies where available.
+
+Builds intentionally follow upstream versions for Go, Rust, uv, helper binaries,
+Node package managers and browser tooling. Python, nvm and Helm defaults can be
+overridden with `--build-arg PYTHON_VERSION=...`, `NVM_VERSION=...`, and
+`HELM_VERSION=...`. Rebuild to update baked tools; existing user-selected runtime
+versions remain selected. Pin upstream images and tool versions before requiring
+reproducible releases. Browsers and native build tools make `dev` substantially
+larger than `base`.
 
 ## Usage
 
@@ -67,7 +113,7 @@ agent claude
 agent codex
 agent gemini --image base
 agent claude --git rw      # permit staging, commits and branches
-agent bash --image backend
+agent bash --image dev
 ```
 
 Every project is mounted at `/workspace/<project-directory-name>`; the first
@@ -90,7 +136,7 @@ container; the bind mounts still write directly to their host directories.
 
 ## Maven cache and VPN connectivity
 
-When using `--image backend` (the default), the launcher mounts a named
+When using `--image dev` (the default), the launcher mounts a named
 `agent-maven-cache` volume at `/home/agent/.m2/repository`. This is **shared
 between all agent CLIs and projects**, survives container removal, and is
 separate from the host's `~/.m2` directory. It is **not** mounted under
@@ -156,7 +202,7 @@ rather than the repo root triggers the same warning.
 - Volumes are **shared across all projects for that agent**, not per project.
   This is intentional for convenient sign-in, but means agent-side history and
   config can be accessed by subsequent sessions using the same agent.
-- The Maven repository volume is shared among backend agent sessions, including
+- The Maven repository volume is shared among development agent sessions, including
   concurrent sessions; cache writes can conflict and downloaded artifacts should
   not be treated as trusted merely because they are cached.
 - Concurrent agent sessions may share the same home volume and project files.

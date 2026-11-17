@@ -1,0 +1,69 @@
+# Tool downloads intentionally follow upstream releases, like the base agent CLIs.
+FROM docker.io/library/golang:1-bookworm AS go-tools
+ENV GOBIN=/tools
+RUN go install github.com/go-task/task/v3/cmd/task@latest \
+    && go install github.com/yannh/kubeconform/cmd/kubeconform@latest \
+    && go install github.com/mikefarah/yq/v4@latest \
+    && go install mvdan.cc/sh/v3/cmd/shfmt@latest
+
+FROM docker.io/library/rust:slim-bookworm AS rust-tools
+RUN rustup component add rustfmt clippy && cargo install --locked eza
+
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
+FROM localhost/agent-base:latest
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      ruby ruby-dev ruby-bundler python3 python3-venv python3-pip \
+      openjdk-17-jdk-headless maven \
+      build-essential cmake pkg-config libssl-dev libffi-dev zlib1g-dev \
+      libpq-dev libsqlite3-dev libyaml-dev libreadline-dev \
+      sqlite3 postgresql-client git-lfs shellcheck yamllint \
+      xz-utils bzip2 zstd zip diffutils patch file xxd rsync \
+      lsof psmisc iproute2 dnsutils netcat-openbsd time locales tzdata \
+    && localedef -i en_US -f UTF-8 en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=go-tools /usr/local/go /usr/local/go
+COPY --from=go-tools /tools/ /usr/local/bin/
+COPY --from=rust-tools /usr/local/cargo/bin/ /opt/cargo/bin/
+COPY --from=rust-tools /usr/local/rustup/ /opt/rustup/
+COPY --from=rust-tools /usr/local/cargo/bin/eza /usr/local/bin/eza
+COPY --from=uv /uv /uvx /usr/local/bin/
+
+ENV LANG=en_US.UTF-8 \
+    UV_PYTHON_INSTALL_DIR=/opt/python \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
+    PATH=/home/agent/.local/bin:/home/agent/.cargo/bin:/home/agent/go/bin:/usr/local/go/bin:/opt/python-bin:/opt/cargo/bin:$PATH
+
+ARG NVM_VERSION=v0.40.3
+ARG PYTHON_VERSION=3.13
+ARG HELM_VERSION=v3.17.3
+RUN git clone --depth 1 --branch "$NVM_VERSION" https://github.com/nvm-sh/nvm.git /opt/nvm \
+    && mkdir -p /opt/nvm/versions/node \
+    && ln -s /usr/local /opt/nvm/versions/node/"$(node --version)" \
+    && uv python install "$PYTHON_VERSION" \
+    && mkdir /opt/python-bin \
+    && ln -s "$(uv python find "$PYTHON_VERSION")" /opt/python-bin/python \
+    && ln -s python /opt/python-bin/python3
+RUN set -eu; \
+    arch="$(dpkg --print-architecture)"; \
+    curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" -o /tmp/helm.tar.gz; \
+    tar -xzf /tmp/helm.tar.gz -C /tmp; \
+    install "/tmp/linux-${arch}/helm" /usr/local/bin/helm; \
+    rm -rf /tmp/helm.tar.gz "/tmp/linux-${arch}"
+
+# Agent CLI installations remain in /usr/local, independent of project Node versions.
+# The official Node base image already provides yarn/yarnpkg.
+RUN npm install --global --no-audit --no-fund pnpm playwright \
+    && playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/playwright \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/dev-entrypoint /usr/local/bin/dev-entrypoint
+COPY scripts/dev-shell.sh /etc/profile.d/agent-dev.sh
+RUN chmod +x /usr/local/bin/dev-entrypoint \
+    && printf '\nsource /etc/profile.d/agent-dev.sh\n' >> /etc/bash.bashrc
+ENTRYPOINT ["/usr/local/bin/dev-entrypoint"]
+CMD ["bash"]
