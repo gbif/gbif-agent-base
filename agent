@@ -19,73 +19,100 @@ The container is removed on exit; agent homes and Maven cache are retained.
 HELP
 }
 
-if (( $# == 0 )); then
+if (($# == 0)); then
   usage >&2
   exit 2
 fi
 
 case "$1" in
-  -h|--help) usage; exit 0 ;;
-  claude|codex|gemini|bash) agent_name=$1; shift ;;
-  *) usage >&2; exit 2 ;;
+-h | --help)
+  usage
+  exit 0
+  ;;
+claude | codex | gemini | bash)
+  agent_name=$1
+  shift
+  ;;
+*)
+  usage >&2
+  exit 2
+  ;;
 esac
 
 flavor=dev
 git_access=ro
 assume_yes=false
 projects=()
-while (( $# > 0 )); do
+while (($# > 0)); do
   case "$1" in
-    --image)
-      (( $# >= 2 )) || { echo 'Missing --image value' >&2; exit 2; }
-      flavor=$2
-      shift 2
-      ;;
-    --git)
-      (( $# >= 2 )) || { echo 'Missing --git value' >&2; exit 2; }
-      git_access=$2
-      shift 2
-      ;;
-    --project)
-      (( $# >= 2 )) || { echo 'Missing --project directory' >&2; exit 2; }
-      projects+=("$2")
-      shift 2
-      ;;
-    --yes)
-      assume_yes=true
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    --)
-      shift
-      break
-      ;;
-    *)
-      # Remaining parameters belong to the selected agent.
-      break
-      ;;
+  --image)
+    (($# >= 2)) || {
+      echo 'Missing --image value' >&2
+      exit 2
+    }
+    flavor=$2
+    shift 2
+    ;;
+  --git)
+    (($# >= 2)) || {
+      echo 'Missing --git value' >&2
+      exit 2
+    }
+    git_access=$2
+    shift 2
+    ;;
+  --project)
+    (($# >= 2)) || {
+      echo 'Missing --project directory' >&2
+      exit 2
+    }
+    projects+=("$2")
+    shift 2
+    ;;
+  --yes)
+    assume_yes=true
+    shift
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  --)
+    shift
+    break
+    ;;
+  *)
+    # Remaining parameters belong to the selected agent.
+    break
+    ;;
   esac
 done
 
 case "$git_access" in
-  ro|rw) ;;
-  *) echo "Unknown Git access mode: $git_access (expected ro or rw)" >&2; exit 2 ;;
+ro | rw) ;;
+*)
+  echo "Unknown Git access mode: $git_access (expected ro or rw)" >&2
+  exit 2
+  ;;
 esac
 
 case "$flavor" in
-  base|dev) ;;
-  backend) flavor=dev ;;
-  *) echo "Unknown image flavor: $flavor" >&2; exit 2 ;;
+base | dev) ;;
+backend) flavor=dev ;;
+*)
+  echo "Unknown image flavor: $flavor" >&2
+  exit 2
+  ;;
 esac
 
-if (( ${#projects[@]} == 0 )); then
+if ((${#projects[@]} == 0)); then
   projects+=("$PWD")
 fi
 
-command -v podman >/dev/null || { echo 'Podman not found' >&2; exit 1; }
+command -v podman >/dev/null || {
+  echo 'Podman not found' >&2
+  exit 1
+}
 
 warnings=()
 warn() {
@@ -105,9 +132,9 @@ scan_project() {
   fi
 
   case "$path" in
-    */.ssh|*/.aws|*/.config|*/.kube|*/.gnupg|*/.docker)
-      warn "$destination: directly mounting a credential/configuration directory ($path)"
-      ;;
+  */.ssh | */.aws | */.config | */.kube | */.gnupg | */.docker)
+    warn "$destination: directly mounting a credential/configuration directory ($path)"
+    ;;
   esac
 
   while IFS= read -r -d '' entry; do
@@ -116,23 +143,23 @@ scan_project() {
     base=${lower##*/}
 
     case "/$lower/" in
-      */test/*|*/tests/*|*/testdata/*|*/fixtures/*|*/__tests__/*|*/examples/*|*/samples/*)
-        continue
-        ;;
+    */test/* | */tests/* | */testdata/* | */fixtures/* | */__tests__/* | */examples/* | */samples/*)
+      continue
+      ;;
     esac
     case "$base" in
-      *test*|*mock*|*fixture*|*sample*|*example*|*template*|*.dist|*.example)
-        continue
-        ;;
+    *test* | *mock* | *fixture* | *sample* | *example* | *template* | *.dist | *.example)
+      continue
+      ;;
     esac
 
     case "$base" in
-      .env|.env.*|.npmrc|.pypirc|.netrc|credentials|credentials.json|service-account.json|id_rsa|id_ed25519|*.pem|*.key|*.p12|*.pfx|terraform.tfstate|terraform.tfstate.*)
-        warn "$destination: possible credential file: $rel"
-        found=$((found + 1))
-        ;;
+    .env | .env.* | .npmrc | .pypirc | .netrc | credentials | credentials.json | service-account.json | id_rsa | id_ed25519 | *.pem | *.key | *.p12 | *.pfx | terraform.tfstate | terraform.tfstate.*)
+      warn "$destination: possible credential file: $rel"
+      found=$((found + 1))
+      ;;
     esac
-    if (( found >= 8 )); then
+    if ((found >= 8)); then
       warn "$destination: additional matching files may exist (showing first 8)"
       break
     fi
@@ -151,7 +178,7 @@ scan_project() {
 
 confirm_warnings() {
   local item answer
-  if (( ${#warnings[@]} == 0 )); then
+  if ((${#warnings[@]} == 0)); then
     echo 'Preflight: no common credential-file or mount warnings detected (not a security guarantee).' >&2
     return
   fi
@@ -172,8 +199,11 @@ confirm_warnings() {
   fi
   read -r -p 'Continue with these mounts? [y/N] ' answer </dev/tty || exit 1
   case "$answer" in
-    y|Y|yes|YES) ;;
-    *) echo 'Cancelled.' >&2; exit 1 ;;
+  y | Y | yes | YES) ;;
+  *)
+    echo 'Cancelled.' >&2
+    exit 1
+    ;;
   esac
 }
 
@@ -206,7 +236,7 @@ for index in "${!projects[@]}"; do
     fi
   done
   resolved_destinations+=("$destination")
-  if (( index == 0 )); then
+  if ((index == 0)); then
     primary_destination=$destination
   fi
 
@@ -267,7 +297,7 @@ exec podman run --rm -it \
   --env HOME=/home/agent \
   --env GIT_OPTIONAL_LOCKS=0 \
   "${mounts[@]}" \
-  --mount "type=volume,source=${volume},destination=/home/agent,volume-opt=U" \
+  --mount "type=volume,source=${volume},destination=/home/agent,U=true" \
   "${maven_mount[@]}" \
   --workdir "$primary_destination" \
   "$image" "$agent_name" "${agent_args[@]}" "$@"
