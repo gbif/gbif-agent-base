@@ -9,6 +9,7 @@ Options:
   --image base|dev        Image flavor (default: dev; backend aliases dev)
   --project DIR           Mount a project (repeatable); first is working directory
   --git ro|rw             Git metadata access (default: ro)
+  --memory SIZE           Container memory limit, e.g. 3g or 10g (default: 6g)
   --yes                   Accept Git and security preflight warnings
   -h, --help              Show this help
 
@@ -41,6 +42,7 @@ esac
 
 flavor=dev
 git_access=ro
+memory_limit=6g
 assume_yes=false
 projects=()
 while (($# > 0)); do
@@ -59,6 +61,18 @@ while (($# > 0)); do
       exit 2
     }
     git_access=$2
+    shift 2
+    ;;
+  --memory)
+    if (($# < 2)) || [[ $2 == -* ]]; then
+      echo 'Missing --memory value' >&2
+      exit 2
+    fi
+    memory_limit=$2
+    if [[ ! "$memory_limit" =~ ^[1-9][0-9]*[bBkKmMgG]?$ ]]; then
+      echo "Invalid memory limit: $memory_limit (expected a positive size, e.g. 10g or 3072m)" >&2
+      exit 2
+    fi
     shift 2
     ;;
   --project)
@@ -292,7 +306,7 @@ exec podman run --rm -it \
   --security-opt=no-new-privileges \
   --cap-drop=ALL \
   --pids-limit=512 \
-  --memory=6g \
+  --memory="$memory_limit" \
   --tmpfs /tmp:rw,nosuid,nodev,size=1g \
   --env HOME=/home/agent \
   --env GIT_OPTIONAL_LOCKS=0 \

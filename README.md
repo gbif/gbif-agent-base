@@ -48,15 +48,17 @@ task install              # installs launcher at ~/.local/bin/agent
 Without Task:
 
 ```sh
-podman build -f Containerfile.base -t localhost/agent-base:latest .
+podman build --pull=always --no-cache -f Containerfile.base -t localhost/agent-base:latest .
 podman build -f Containerfile.dev -t localhost/agent-dev:latest .
 bash ./install.sh
 ```
 
 The installer only copies the `agent` launcher. Override its destination with
 `INSTALL_DIR="$HOME/bin" bash ./install.sh`. Make sure it is on `PATH`.
-Images are updated explicitly by rebuilding; neither the launcher nor the
-container automatically updates agent versions.
+`task build` pulls the current Node base and reruns the base image package
+installs, refreshing Debian's CA bundle and the agent CLIs. The development
+build can reuse eligible cached layers. If Claude's connection uses a private
+CA, that CA still needs to be trusted inside the agent container.
 
 ## Shared development image
 
@@ -135,7 +137,13 @@ agent codex
 agent gemini --image base
 agent claude --git rw      # permit staging, commits and branches
 agent bash --image dev
+agent claude --memory 10g
+agent codex --memory 3g
 ```
+
+`--memory` sets the limit for one session and defaults to 6 GiB. On macOS,
+check the VM's memory allocation with `podman machine list`. The VM needs
+enough RAM for the session and any other workloads running inside it.
 
 `agent codex` automatically passes
 `--dangerously-bypass-approvals-and-sandbox`. Podman provides the isolation;

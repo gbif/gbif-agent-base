@@ -13,9 +13,9 @@ tasks:
       - dev
 
   base:
-    desc: Build CLI and shared tooling image
+    desc: Refresh the Node base, CA certificates, and agent CLIs
     cmds:
-      - podman build -f Containerfile.base -t localhost/agent-base:latest .
+      - podman build --pull=always --no-cache -f Containerfile.base -t localhost/agent-base:latest .
 
   dev:
     desc: Build shared development image (depends on base)
