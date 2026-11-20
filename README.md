@@ -25,8 +25,8 @@ Machine on macOS.
                                                       |
                      disposable container            |
   +---------------------------------------------------|---+
-  | agent-base (Claude / Codex / Gemini, Git, rg, jq)  |   |
-  |       + agent-dev (shared development tools)      |   |
+  | agent-base or agent-dev (Claude / Codex / Gemini) |   |
+  |       agent-dev also has development tools        |   |
   |                                                   v   |
   |                 /home/agent (persistent per agent)     |
   |                 /home/agent/.m2/repository (shared)    |
@@ -41,24 +41,33 @@ Prerequisites: Podman (with an initialized and running Podman machine on macOS),
 [Task](https://taskfile.dev/) for convenient image builds.
 
 ```sh
-task build                # builds base, then dev
+task build                # builds the shared foundation, base, and dev
+task full-rebuild         # rebuilds all three without cached layers
+task cleanup              # prompts before pruning dangling Podman images
 task install              # installs launcher at ~/.local/bin/agent
 ```
 
 Without Task:
 
 ```sh
-podman build --pull=always --no-cache -f Containerfile.base -t localhost/agent-base:latest .
-podman build -f Containerfile.dev -t localhost/agent-dev:latest .
+refresh="$(date -u +%s)-$$"
+podman build --pull=always -f Containerfile.foundation -t localhost/agent-foundation:latest .
+podman build --pull=never --build-arg AGENT_REFRESH="$refresh" -f Containerfile.base -t localhost/agent-base:latest .
+podman build --build-arg AGENT_REFRESH="$refresh" -f Containerfile.dev -t localhost/agent-dev:latest .
 bash ./install.sh
 ```
 
 The installer only copies the `agent` launcher. Override its destination with
 `INSTALL_DIR="$HOME/bin" bash ./install.sh`. Make sure it is on `PATH`.
-`task build` pulls the current Node base and reruns the base image package
-installs, refreshing Debian's CA bundle and the agent CLIs. The development
-build can reuse eligible cached layers. If Claude's connection uses a private
-CA, that CA still needs to be trusted inside the agent container.
+`task build` checks for a newer Node base and refreshes Debian's CA bundle
+and the three agent CLIs on every run. Putting the refresh at the end lets
+Podman reuse the dev toolchains and Chromium when their inputs stay the same.
+A newer Node base can invalidate those layers. If a connection uses a private
+CA, the agent container must trust that CA.
+
+`task cleanup` prunes dangling images across the current Podman connection,
+including images from other projects. It keeps tagged images, containers and
+named volumes, including agent homes and the Maven cache.
 
 ## Shared development image
 

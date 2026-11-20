@@ -13,7 +13,7 @@ FROM ghcr.io/astral-sh/uv:latest AS uv
 
 FROM docker.io/library/eclipse-temurin:25-jdk-jammy AS java25
 
-FROM localhost/agent-base:latest
+FROM localhost/agent-foundation:latest
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -73,5 +73,10 @@ COPY scripts/dev-entrypoint /usr/local/bin/dev-entrypoint
 COPY scripts/dev-shell.sh /etc/profile.d/agent-dev.sh
 RUN chmod +x /usr/local/bin/dev-entrypoint \
     && printf '\nsource /etc/profile.d/agent-dev.sh\n' >> /etc/bash.bashrc
+
+COPY scripts/install-agent-tools.sh /tmp/install-agent-tools.sh
+ARG AGENT_REFRESH
+RUN sh /tmp/install-agent-tools.sh && rm /tmp/install-agent-tools.sh
+
 ENTRYPOINT ["/usr/local/bin/dev-entrypoint"]
 CMD ["bash"]
