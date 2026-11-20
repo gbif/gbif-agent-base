@@ -4,6 +4,8 @@ Run Claude Code, OpenAI Codex, or Gemini CLI inside a disposable rootless Podman
 container, without mounting the host home directory. Targets Linux and Podman
 Machine on macOS.
 
+See the [changelog](CHANGELOG.md) for launcher and image changes.
+
 ## Overview
 
 ```text
