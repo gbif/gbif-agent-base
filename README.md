@@ -268,3 +268,21 @@ rather than the repo root triggers the same warning.
 - Not yet covered: Git worktree metadata, automated network allowlists,
   project-secret exclusion, read-only container rootfs, SELinux labeling,
   Maven settings/credentials and automated Podman integration tests.
+
+## Back up and restore agent volumes
+
+Close agent sessions and stop other containers writing to agent volumes before
+backing up. Run `task backup` to export the existing agent home volumes and
+shared Maven cache. The task prints the path to a new, private backup directory
+in your home folder. Set `BACKUP_DIR` to choose a different new directory.
+The archives can contain credentials and session history.
+
+```sh
+task backup
+task restore BACKUP_DIR="$HOME/podman-volume-backup-YYYYMMDD-HHMMSS" PODMAN_CONNECTION=agent-200
+```
+
+Both tasks accept `PODMAN_CONNECTION` to select a named connection. Restore
+checks every archived volume name on that connection and aborts before
+creating anything if any target already exists, even if it is empty. Run
+restore before starting agents on the new machine.

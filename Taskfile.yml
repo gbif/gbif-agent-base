@@ -50,3 +50,19 @@ tasks:
     desc: Compare host and container HTTP access to a VPN-only endpoint
     cmds:
       - bash ./vpn-test.sh
+
+  backup:
+    desc: Back up existing agent volumes to a new local directory
+    env:
+      BACKUP_DIR: '{{.BACKUP_DIR}}'
+      PODMAN_CONNECTION: '{{.PODMAN_CONNECTION}}'
+    cmds:
+      - bash ./scripts/volume-backup.sh backup
+
+  restore:
+    desc: Restore agent volumes from BACKUP_DIR when all target names are absent
+    env:
+      BACKUP_DIR: '{{.BACKUP_DIR}}'
+      PODMAN_CONNECTION: '{{.PODMAN_CONNECTION}}'
+    cmds:
+      - bash ./scripts/volume-backup.sh restore
